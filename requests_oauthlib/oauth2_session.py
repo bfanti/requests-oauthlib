@@ -35,7 +35,7 @@ class OAuth2Session(requests.Session):
     """
 
     def __init__(self, client_id=None, client=None, auto_refresh_url=None,
-            auto_refresh_kwargs=None, scope=None, redirect_uri=None, token=None,
+            auto_refresh_kwargs=None, auto_refresh_headers=None, scope=None, redirect_uri=None, token=None,
             state=None, token_updater=None, **kwargs):
         """Construct a new OAuth 2 client session.
 
@@ -74,6 +74,7 @@ class OAuth2Session(requests.Session):
         self._state = state
         self.auto_refresh_url = auto_refresh_url
         self.auto_refresh_kwargs = auto_refresh_kwargs or {}
+        self.auto_refresh_headers = auto_refresh_headers
         self.token_updater = token_updater
         self._client = client or WebApplicationClient(client_id, token=token)
         self._client._populate_attributes(token or {})
@@ -216,11 +217,10 @@ class OAuth2Session(requests.Session):
         self.token = self._client.token
         return self.token
 
-    def refresh_token(self, token_url, refresh_token=None, body='', auth=None,
+    def refresh_token(self, refresh_token=None, body='', auth=None,
                       timeout=None, verify=True, **kwargs):
         """Fetch a new access token using a refresh token.
 
-        :param token_url: The token endpoint, must be HTTPS.
         :param refresh_token: The refresh_token to use.
         :param body: Optional application/x-www-form-urlencoded body to add the
                      include in the token request. Prefer kwargs over body.
@@ -230,10 +230,10 @@ class OAuth2Session(requests.Session):
         :param kwargs: Extra parameters to include in the token request.
         :return: A token dict
         """
-        if not token_url:
+        if not self.auto_refresh_url:
             raise ValueError('No token endpoint set for auto_refresh.')
 
-        if not is_secure_transport(token_url):
+        if not is_secure_transport(self.auto_refresh_url):
             raise InsecureTransportError()
 
         # Need to nullify token to prevent it from being added to the request
@@ -246,8 +246,8 @@ class OAuth2Session(requests.Session):
         body = self._client.prepare_refresh_body(body=body,
                 refresh_token=refresh_token, scope=self.scope, **kwargs)
         log.debug('Prepared refresh token request body %s', body)
-        r = self.post(token_url, data=dict(urldecode(body)), auth=auth,
-                      timeout=timeout, verify=verify)
+        r = self.post(self.auto_refresh_url, data=dict(urldecode(body)), auth=auth,
+                      timeout=timeout, verify=verify, headers=self.auto_refresh_headers)
         log.debug('Request to refresh token completed with status %s.',
                   r.status_code)
         log.debug('Response headers were %s and content %s.',
@@ -284,7 +284,7 @@ class OAuth2Session(requests.Session):
                 if self.auto_refresh_url:
                     log.debug('Auto refresh is set, attempting to refresh at %s.',
                               self.auto_refresh_url)
-                    token = self.refresh_token(self.auto_refresh_url)
+                    token = self.refresh_token()
                     if self.token_updater:
                         log.debug('Updating token to %s using %s.',
                                   token, self.token_updater)
